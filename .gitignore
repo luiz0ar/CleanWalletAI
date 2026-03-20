@@ -1,0 +1,15 @@
+/vendor
+/node_modules
+/.env
+/.env.local
+/.env.*.php
+/storage/*.key
+/bootstrap/cache/*.php
+/public/hot
+/public/storage
+/storage/*.key
+/.idea
+/.vscode
+.phpunit.result.cache
+Homestead.json
+Homestead.yaml
