@@ -39,8 +39,24 @@ services:
     networks:
       - fin-network
 
+  ngrok:
+    image: ngrok/ngrok:latest
+    restart: always
+    depends_on:
+      - web
+    command: http web:80 --host-header=rewrite
+    environment:
+      - NGROK_AUTHTOKEN=3BDdALCV9N13feC0AFVvLYfm8XP_4Y3NZJ8GVqe5QAGS7tQGC
+    ports:
+      - "4040:4040"
+    networks:
+      - fin-network
+
 networks:
   fin-network:
+    driver: bridge
+    
+  my-network:
     driver: bridge
 
 volumes:

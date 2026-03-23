@@ -11,13 +11,12 @@ class LangflowClient
 
     public function __construct()
     {
-        $this->baseUrl = env('LANGFLOW_URL', 'http://langflow:7860');
+        $this->baseUrl = env('LANGFLOW_URL');
         $this->http = new Client(['base_uri' => $this->baseUrl]);
     }
 
     public function parseMessage(string $text, string $now): array
     {
-        // Stubbed implementation: forwards to Langflow endpoint
         $resp = $this->http->post('/parse', [
             'json' => [
                 'text' => $text,
@@ -27,7 +26,6 @@ class LangflowClient
 
         $body = json_decode((string)$resp->getBody(), true);
 
-        // Expect strict JSON: valor, categoria, descricao, data
         return [
             'valor' => $body['valor'] ?? 0,
             'categoria' => $body['categoria'] ?? 'Outros',
