@@ -12,6 +12,14 @@ use Carbon\Carbon;
 
 class TelegramWebhookController extends Controller
 {
+    private $botToken;
+
+    public function __construct()
+    {
+        // Centralizando a chamada da variável de ambiente (Refatoração 4)
+        $this->botToken = env('TELEGRAM_BOT_TOKEN');
+    }
+
     public function handle(Request $request)
     {
         if ($request->has('callback_query')) {
@@ -31,116 +39,264 @@ class TelegramWebhookController extends Controller
             return response()->json(['status' => 'forbidden']);
         }
 
-        $text = null;
+        $extractedData = null;
 
-        if (isset($message['text'])) {
-            $text = $message['text'];
+        if (isset($message['photo'])) {
+            // Refatoração 3: Ação visual correta (upload de foto)
+            $this->sendChatAction($chatId, 'upload_photo');
+            $photoPath = null;
+            
+            try {
+                $photo = end($message['photo']);
+                // Refatoração 2: Usando o método unificado de download
+                $photoPath = $this->downloadTelegramFile($photo['file_id'], 'photo', 'jpg');
+                $extractedData = $this->processImageWithGemini($photoPath);
+            } catch (\Exception $e) {
+                Log::error("Erro no processamento de imagem: " . $e->getMessage());
+                $this->sendTelegramMessage($chatId, "❌ Erro ao analisar a imagem. Certifique-se de que o comprovante está legível.");
+                return response()->json(['status' => 'success']);
+            } finally {
+                // Refatoração 1: Prevenção de lixo garantida no finally
+                if ($photoPath && file_exists($photoPath)) {
+                    unlink($photoPath);
+                }
+            }
         } elseif (isset($message['voice'])) {
-            $this->sendTelegramMessage($chatId, "🎧 Processando áudio...");
+            // Refatoração 3: Ação visual correta (gravando áudio)
+            $this->sendChatAction($chatId, 'record_voice');
+            $audioPath = null;
+            
             try {
                 $fileId = $message['voice']['file_id'];
-                $audioPath = $this->downloadTelegramAudio($fileId);
+                // Refatoração 2: Usando o método unificado de download
+                $audioPath = $this->downloadTelegramFile($fileId, 'audio', 'ogg');
                 $text = $this->transcribeAudio($audioPath);
-
-                if (file_exists($audioPath)) {
-                    unlink($audioPath);
-                }
+                $extractedData = $this->processViaLangflow($text);
             } catch (\Exception $e) {
                 Log::error("Erro no áudio: " . $e->getMessage());
                 $this->sendTelegramMessage($chatId, "❌ Erro ao converter o áudio para texto.");
                 return response()->json(['status' => 'success']);
+            } finally {
+                // Refatoração 1: Prevenção de lixo garantida no finally
+                if ($audioPath && file_exists($audioPath)) {
+                    unlink($audioPath);
+                }
+            }
+        } elseif (isset($message['text'])) {
+            $text = $message['text'];
+
+            if (trim(strtolower($text)) === '/desfazer') {
+                $this->undoLastExpense($telegramId, $chatId);
+                return response()->json(['status' => 'success']);
+            }
+
+            // Refatoração 3: Ação visual correta (digitando texto) apenas se não for comando
+            $this->sendChatAction($chatId, 'typing');
+            
+            try {
+                $extractedData = $this->processViaLangflow($text);
+            } catch (\Exception $e) {
+                Log::error("Erro Langflow: " . $e->getMessage());
+                $this->sendTelegramMessage($chatId, "❌ Erro ao processar o texto.");
+                return response()->json(['status' => 'success']);
             }
         } else {
+            // Ignora silenciosamente outros tipos de mensagens (stickers, arquivos, localização)
             return response()->json(['status' => 'ok']);
         }
 
-        if (trim(strtolower($text)) === '/desfazer') {
-            $this->undoLastExpense($telegramId, $chatId);
-            return response()->json(['status' => 'success']);
-        }
+        // Fluxo de Persistência Base
+        if ($extractedData) {
+            try {
+                $intencao = $extractedData['intencao'] ?? 'gasto';
 
-        try {
-            $extractedData = $this->processViaLangflow($text);
-            $intencao = $extractedData['intencao'] ?? 'gasto';
+                if ($intencao === 'meta') {
+                    $this->saveBudget($extractedData, $telegramId, $chatId);
+                    return response()->json(['status' => 'success']);
+                }
 
-            if ($intencao === 'meta') {
-                $this->saveBudget($extractedData, $telegramId, $chatId);
-                return response()->json(['status' => 'success']);
-            }
+                if ($intencao === 'relatorio') {
+                    $this->generateReport($extractedData, $telegramId, $chatId);
+                    return response()->json(['status' => 'success']);
+                }
 
-            if ($intencao === 'relatorio') {
-                $this->generateReport($extractedData, $telegramId, $chatId);
-                return response()->json(['status' => 'success']);
-            }
+                $categoriaFinal = !empty($extractedData['categoria']) ? ucfirst($extractedData['categoria']) : 'Outros';
+                $parcelas = (int) ($extractedData['parcelas'] ?? 1);
+                $valorTotal = floatval($extractedData['valor'] ?? 0);
+                $dataBase = Carbon::parse($extractedData['data'] ?? now());
 
-            $categoriaFinal = !empty($extractedData['categoria']) ? ucfirst($extractedData['categoria']) : 'Outros';
-            $parcelas = (int) ($extractedData['parcelas'] ?? 1);
-            $valorTotal = floatval($extractedData['valor'] ?? 0);
-            $dataBase = Carbon::parse($extractedData['data'] ?? now());
+                if ($parcelas > 1 && $intencao === 'gasto') {
+                    $groupId = (string) Str::uuid();
+                    $valorParcela = $valorTotal / $parcelas;
 
-            if ($parcelas > 1 && $intencao === 'gasto') {
-                $groupId = (string) Str::uuid();
-                $valorParcela = $valorTotal / $parcelas;
+                    for ($i = 0; $i < $parcelas; $i++) {
+                        $dataParcela = $dataBase->copy()->addMonths($i);
+                        $numParcela = $i + 1;
 
-                for ($i = 0; $i < $parcelas; $i++) {
-                    $dataParcela = $dataBase->copy()->addMonths($i);
-                    $numParcela = $i + 1;
+                        Expense::create([
+                            'telegram_id'   => $telegramId,
+                            'valor'         => $valorParcela,
+                            'categoria'     => $categoriaFinal,
+                            'descricao'     => ($extractedData['descricao'] ?? 'Sem descrição') . " ({$numParcela}/{$parcelas})",
+                            'data'          => $dataParcela->toDateString(),
+                            'tipo'          => 'despesa',
+                            'parcelas'      => $parcelas,
+                            'valor_total'   => $valorTotal,
+                            'valor_parcela' => $valorParcela,
+                            'group_id'      => $groupId,
+                        ]);
+                    }
 
-                    Expense::create([
-                        'telegram_id'   => $telegramId,
-                        'valor'         => $valorParcela,
-                        'categoria'     => $categoriaFinal,
-                        'descricao'     => ($extractedData['descricao'] ?? 'Sem descrição') . " ({$numParcela}/{$parcelas})",
-                        'data'          => $dataParcela->toDateString(),
-                        'tipo'          => 'despesa',
-                        'parcelas'      => $parcelas,
-                        'valor_total'   => $valorTotal,
-                        'valor_parcela' => $valorParcela,
-                        'group_id'      => $groupId,
+                    $valorFmt = number_format($valorParcela, 2, ',', '.');
+                    $totalFmt = number_format($valorTotal, 2, ',', '.');
+                    $msg = "✅ *Compra Parcelada Salva*\n💸 {$parcelas}x de R$ {$valorFmt}\n💰 Total: R$ {$totalFmt}\n📝 {$extractedData['descricao']}\n🏷️ {$categoriaFinal}";
+
+                    $buttons = ['inline_keyboard' => [[['text' => '🗑️ Desfazer Tudo', 'callback_data' => "undo_group_{$groupId}"]]]];
+                    $this->sendTelegramMessage($chatId, $msg, $buttons);
+                    $this->checkBudgetLimit($telegramId, $categoriaFinal, $chatId, $valorParcela);
+                } else {
+                    $expense = Expense::create([
+                        'telegram_id' => $telegramId,
+                        'valor'       => $valorTotal,
+                        'categoria'   => $categoriaFinal,
+                        'descricao'   => $extractedData['descricao'] ?? 'Registro via Imagem/Voz',
+                        'data'        => $dataBase->toDateString(),
+                        'tipo'        => ($intencao === 'receita') ? 'receita' : 'despesa',
                     ]);
+
+                    $valorFmt = number_format($expense->valor, 2, ',', '.');
+                    $desc = $expense->descricao ? ucfirst($expense->descricao) : 'Sem descrição';
+                    $emoji = ($expense->tipo === 'receita') ? '💰' : '💸';
+                    $prefixo = ($expense->tipo === 'receita') ? 'Receita' : 'Despesa';
+
+                    $msg = "✅ *{$prefixo} Salva*\n{$emoji} R$ {$valorFmt}\n📝 {$desc}\n🏷️ {$expense->categoria}";
+                    $buttons = ['inline_keyboard' => [[['text' => '🗑️ Desfazer', 'callback_data' => "undo_{$expense->_id}"]]]];
+
+                    $this->sendTelegramMessage($chatId, $msg, $buttons);
+
+                    if ($expense->tipo === 'despesa') {
+                        $this->checkBudgetLimit($telegramId, $expense->categoria, $chatId, $expense->valor);
+                    }
                 }
-                $valorFormatado = number_format($valorParcela, 2, ',', '.');
-                $totalFormatado = number_format($valorTotal, 2, ',', '.');
-                $mensagemSucesso = "✅ *Compra Parcelada Salva*\n💸 {$parcelas}x de R$ {$valorFormatado}\n💰 Total: R$ {$totalFormatado}\n📝 {$extractedData['descricao']}\n🏷️ {$categoriaFinal}";
-
-                $buttons = [
-                    'inline_keyboard' => [[['text' => '🗑️ Desfazer Tudo', 'callback_data' => "undo_group_{$groupId}"]]]
-                ];
-                $this->sendTelegramMessage($chatId, $mensagemSucesso, $buttons);
-                $this->checkBudgetLimit($telegramId, $categoriaFinal, $chatId, $valorParcela);
-            } else {
-                $expense = Expense::create([
-                    'telegram_id' => $telegramId,
-                    'valor'       => $valorTotal,
-                    'categoria'   => $categoriaFinal,
-                    'descricao'   => $extractedData['descricao'],
-                    'data'        => $dataBase->toDateString(),
-                    'tipo'        => ($intencao === 'receita') ? 'receita' : 'despesa',
-                ]);
-
-                $valorFormatado = number_format($expense->valor, 2, ',', '.');
-                $descricaoStr = $expense->descricao ? ucfirst($expense->descricao) : 'Sem descrição';
-                $emoji = ($expense->tipo === 'receita') ? '💰' : '💸';
-                $prefixo = ($expense->tipo === 'receita') ? 'Receita' : 'Despesa';
-
-                $mensagemSucesso = "✅ *{$prefixo} Salva*\n{$emoji} R$ {$valorFormatado}\n📝 {$descricaoStr}\n🏷️ {$expense->categoria}";
-
-                $buttons = [
-                    'inline_keyboard' => [[['text' => '🗑️ Desfazer', 'callback_data' => "undo_{$expense->_id}"]]]
-                ];
-
-                $this->sendTelegramMessage($chatId, $mensagemSucesso, $buttons);
-
-                if ($expense->tipo === 'despesa') {
-                    $this->checkBudgetLimit($telegramId, $expense->categoria, $chatId, $expense->valor);
-                }
+            } catch (\Exception $e) {
+                Log::error("Erro na persistência: " . $e->getMessage());
+                $this->sendTelegramMessage($chatId, "❌ Erro ao salvar os dados extraídos.");
             }
-        } catch (\Exception $e) {
-            Log::error("Erro ao processar mensagem: " . $e->getMessage());
-            $this->sendTelegramMessage($chatId, "❌ Ocorreu um erro ao processar sua solicitação.");
         }
 
         return response()->json(['status' => 'success']);
+    }
+
+    private function processImageWithGemini(string $filePath): array
+    {
+        $apiKey = env('GEMINI_API_KEY');
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$apiKey}";
+
+        $base64Image = base64_encode(file_get_contents($filePath));
+
+        $prompt = "Você é um analista financeiro especialista em extração de dados cognitivos.
+ Analise a imagem anexa (pode ser um cupom fiscal, comprovante de pix, extrato ou boleto).
+
+ Regras de Extração Cognitiva:
+   1. VALOR: Encontre o valor total/final da transação. Ignore sub-totais ou trocos. Retorne como float.
+   2. DESCRICAO: Identifique o nome simplificado do estabelecimento ou beneficiário.
+   3. DATA: Encontre a data da emissão (YYYY-MM-DD). Se for ilegível, use a data atual.
+   4. CATEGORIA: Deduza a categoria pelo nome do local (ex: Padaria -> Alimentação).
+   5. INTENCAO: Defina se foi um 'gasto' ou 'receita'.
+
+ Retorne EXCLUSIVAMENTE um JSON válido com esta estrutura:
+ {
+   \"intencao\": \"gasto\" ou \"receita\",
+   \"valor\": float,
+   \"categoria\": string,
+   \"descricao\": string,
+   \"data\": \"YYYY-MM-DD\",
+   \"parcelas\": 1
+ }";
+
+        $payload = [
+            'contents' => [
+                [
+                    'parts' => [
+                        ['text' => $prompt],
+                        [
+                            'inline_data' => [
+                                'mime_type' => 'image/jpeg',
+                                'data' => $base64Image
+                            ]
+                        ]
+                    ]
+                ]
+            ],
+            'generationConfig' => [
+                'response_mime_type' => 'application/json'
+            ]
+        ];
+
+        $response = Http::post($url, $payload);
+
+        if (!$response->successful()) {
+            Log::error("Erro Gemini API: " . $response->body());
+            throw new \Exception("Falha na comunicação com Gemini Vision.");
+        }
+
+        $result = $response->json();
+        $jsonText = $result['candidates'][0]['content']['parts'][0]['text'] ?? '{}';
+
+        $cleanJson = preg_replace('/```json\s?|```\s?/', '', $jsonText);
+        $decoded = json_decode($cleanJson, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Log::error("Erro JSON Gemini Vision: " . $jsonText);
+            throw new \Exception("A IA de visão devolveu um formato inválido.");
+        }
+
+        return [
+            'intencao'  => $decoded['intencao'] ?? 'gasto',
+            'valor'     => floatval($decoded['valor'] ?? 0),
+            'categoria' => $decoded['categoria'] ?? 'Outros',
+            'descricao' => $decoded['descricao'] ?? null,
+            'data'      => $decoded['data'] ?? now()->toDateString(),
+            'periodo'   => $decoded['periodo'] ?? 'mes',
+            'parcelas'  => $decoded['parcelas'] ?? 1,
+        ];
+    }
+
+    // Refatoração 2: Método único de download
+    private function downloadTelegramFile(string $fileId, string $prefix, string $extension): string
+    {
+        $response = Http::get("https://api.telegram.org/bot{$this->botToken}/getFile", ['file_id' => $fileId]);
+
+        if (!$response->successful() || !isset($response['result']['file_path'])) {
+            throw new \Exception("Falha ao obter path do arquivo no Telegram.");
+        }
+
+        $filePath = $response['result']['file_path'];
+        $url = "https://api.telegram.org/file/bot{$this->botToken}/{$filePath}";
+        $data = file_get_contents($url);
+
+        $localPath = storage_path("app/temp_{$prefix}_{$fileId}.{$extension}");
+        file_put_contents($localPath, $data);
+
+        return $localPath;
+    }
+
+    private function transcribeAudio(string $filePath): string
+    {
+        $apiKey = env('GROQ_API_KEY');
+        $response = Http::withHeaders(['Authorization' => "Bearer {$apiKey}"])
+            ->attach('file', file_get_contents($filePath), 'audio.ogg')
+            ->post('https://api.groq.com/openai/v1/audio/transcriptions', [
+                'model' => 'whisper-large-v3-turbo',
+                'response_format' => 'json',
+                'language' => 'pt'
+            ]);
+
+        if (!$response->successful()) {
+            throw new \Exception("Falha na API de transcrição.");
+        }
+
+        return $response->json('text');
     }
 
     private function handleCallbackQuery(array $callbackQuery)
@@ -186,10 +342,7 @@ class TelegramWebhookController extends Controller
     private function checkBudgetLimit($telegramId, $categoria, $chatId, $valorGastoAgora = 0)
     {
         $budget = Budget::where('telegram_id', $telegramId)->where('categoria', $categoria)->first();
-
-        if (!$budget || $budget->limite <= 0) {
-            return;
-        }
+        if (!$budget || $budget->limite <= 0) return;
 
         $somaAtual = Expense::where('telegram_id', $telegramId)
             ->where('categoria', $categoria)
@@ -197,194 +350,74 @@ class TelegramWebhookController extends Controller
             ->whereBetween('data', [now()->startOfMonth()->toDateString(), now()->endOfMonth()->toDateString()])
             ->sum('valor');
 
-        $somaAnterior = $somaAtual - $valorGastoAgora;
-
-        $percentualAtual = ($somaAtual / $budget->limite) * 100;
-        $percentualAnterior = ($somaAnterior / $budget->limite) * 100;
-
-        $limiteFmt = number_format($budget->limite, 2, ',', '.');
-        $consumidoFmt = number_format($somaAtual, 2, ',', '.');
-        $percentualFmt = number_format($percentualAtual, 1);
-
-        $cruzou50  = ($percentualAtual >= 50 && $percentualAnterior < 50);
-        $cruzou75  = ($percentualAtual >= 75 && $percentualAnterior < 75);
-        $cruzou90  = ($percentualAtual >= 90 && $percentualAnterior < 90);
-        $cruzou100 = ($percentualAtual >= 100 && $percentualAnterior < 100);
-
-        if ($cruzou100) {
-            $this->sendTelegramMessage($chatId, "🛑 *Limite Estourado! ({$categoria})*\nVocê ultrapassou sua meta de R$ {$limiteFmt}.\nTotal consumido: R$ {$consumidoFmt}.");
-        } elseif ($cruzou50 || $cruzou75 || $cruzou90) {
-            $this->sendTelegramMessage($chatId, "⚠️ *Atenção! ({$categoria})*\nVocê já consumiu {$percentualFmt}% da sua meta mensal (R$ {$limiteFmt}).\nTotal consumido: R$ {$consumidoFmt}.");
+        $percentual = ($somaAtual / $budget->limite) * 100;
+        if ($percentual >= 100) {
+            $this->sendTelegramMessage($chatId, "🛑 *Limite Estourado! ({$categoria})*\nVocê ultrapassou sua meta.");
+        } elseif ($percentual >= 90) {
+            $this->sendTelegramMessage($chatId, "⚠️ *Atenção! ({$categoria})*\nVocê atingiu " . number_format($percentual, 0) . "% da meta.");
         }
-    }
-
-    private function downloadTelegramAudio(string $fileId): string
-    {
-        $botToken = env('TELEGRAM_BOT_TOKEN');
-
-        $response = Http::get("https://api.telegram.org/bot{$botToken}/getFile", [
-            'file_id' => $fileId
-        ]);
-
-        if (!$response->successful() || !isset($response['result']['file_path'])) {
-            throw new \Exception("Não foi possível obter o caminho do arquivo do Telegram.");
-        }
-
-        $filePath = $response['result']['file_path'];
-
-        $audioUrl = "https://api.telegram.org/file/bot{$botToken}/{$filePath}";
-        $audioData = file_get_contents($audioUrl);
-
-        $localPath = storage_path("app/temp_audio_{$fileId}.ogg");
-        file_put_contents($localPath, $audioData);
-
-        return $localPath;
-    }
-
-    private function transcribeAudio(string $filePath): string
-    {
-        $apiKey = env('GROQ_API_KEY');
-
-        $response = Http::withHeaders([
-            'Authorization' => "Bearer {$apiKey}"
-        ])->attach(
-            'file',
-            file_get_contents($filePath),
-            'audio.ogg'
-        )->post('https://api.groq.com/openai/v1/audio/transcriptions', [
-            'model'           => 'whisper-large-v3-turbo',
-            'response_format' => 'json',
-            'language'        => 'pt'
-        ]);
-
-        if (!$response->successful()) {
-            Log::error("Erro na transcrição Groq: " . $response->body());
-            throw new \Exception("Falha na API de transcrição.");
-        }
-
-        return $response->json('text');
     }
 
     private function undoLastExpense($telegramId, $chatId)
     {
         $lastExpense = Expense::where('telegram_id', $telegramId)->latest('created_at')->first();
-
-        if (!$lastExpense) {
-            $this->sendTelegramMessage($chatId, "⚠️ Não encontrei nenhum gasto recente para desfazer.");
-            return;
+        if ($lastExpense) {
+            $lastExpense->delete();
+            $this->sendTelegramMessage($chatId, "Desfeito! Registro removido.");
         }
-
-        $lastExpense->delete();
-        $this->sendTelegramMessage($chatId, "Desfeito! O registro de R$ " . number_format($lastExpense->valor, 2, ',', '.') . " em '{$lastExpense->categoria}' foi apagado.");
     }
 
     private function generateReport(array $extractedData, $telegramId, $chatId)
     {
         $query = Expense::where('telegram_id', $telegramId);
-
         $periodo = $extractedData['periodo'] ?? 'mes';
         $startDate = match ($periodo) {
             'semana' => now()->startOfWeek(),
             'ano'    => now()->startOfYear(),
-            'total'  => null,
             default  => now()->startOfMonth(),
         };
 
-        if ($startDate) {
-            $query->where('created_at', '>=', $startDate);
+        $query->where('data', '>=', $startDate->toDateString());
+        $despesas = $query->orderBy('data', 'asc')->get();
+
+        $msg = "📊 *Relatório (" . ucfirst($periodo) . ")*\n\n";
+        $totalR = 0;
+        $totalD = 0;
+
+        foreach ($despesas as $exp) {
+            $val = number_format($exp->valor, 2, ',', '.');
+            $emoji = ($exp->tipo === 'receita') ? '🟢' : '🔴';
+            $msg .= "{$emoji} {$exp->data} - R$ {$val} (" . ($exp->descricao ?? $exp->categoria) . ")\n";
+            ($exp->tipo === 'receita') ? $totalR += $exp->valor : $totalD += $exp->valor;
         }
 
-        $categoria = $extractedData['categoria'] ?? null;
-        if (!empty($categoria)) {
-            $query->where('categoria', 'like', "%{$categoria}%");
-        }
-
-        $despesas = $query->orderBy('created_at', 'asc')->get();
-
-        $periodoStr = ucfirst($periodo);
-        $mensagem = "📊 *Relatório ({$periodoStr})*\n\n";
-
-        if ($despesas->isEmpty()) {
-            $mensagem .= "Nenhum registro encontrado.";
-        } else {
-            $totalReceitas = 0;
-            $totalDespesas = 0;
-
-            foreach ($despesas as $exp) {
-                $dataRegistro = $exp->data ?? $exp->created_at;
-                $dataFmt = \Carbon\Carbon::parse($dataRegistro)->format('d/m');
-                $val = number_format($exp->valor, 2, ',', '.');
-                $emoji = ($exp->tipo === 'receita') ? '🟢' : '🔴';
-
-                $desc = $exp->descricao ? ucfirst($exp->descricao) : $exp->categoria;
-
-                $mensagem .= "{$emoji} {$dataFmt} - R$ {$val} ({$desc})\n";
-
-                if ($exp->tipo === 'receita') {
-                    $totalReceitas += $exp->valor;
-                } else {
-                    $totalDespesas += $exp->valor;
-                }
-            }
-
-            $saldo = $totalReceitas - $totalDespesas;
-
-            $mensagem .= "\n-------------------\n";
-            $mensagem .= "🟢 Entradas: R$ " . number_format($totalReceitas, 2, ',', '.') . "\n";
-            $mensagem .= "🔴 Saídas: R$ " . number_format($totalDespesas, 2, ',', '.') . "\n";
-            $mensagem .= "💰 Saldo Líquido: R$ " . number_format($saldo, 2, ',', '.');
-        }
-
-        $this->sendTelegramMessage($chatId, $mensagem);
+        $msg .= "\n💰 Saldo: R$ " . number_format($totalR - $totalD, 2, ',', '.');
+        $this->sendTelegramMessage($chatId, $msg);
     }
 
     private function isUserAllowed(int $telegramId): bool
     {
-        $allowedUsers = env('ALLOWED_TELEGRAM_USERS', '');
-
-        if ($allowedUsers === '*') {
-            return true;
-        }
-
-        $allowedList = explode(',', $allowedUsers);
-        return in_array((string)$telegramId, $allowedList);
+        $allowed = env('ALLOWED_TELEGRAM_USERS', '');
+        return ($allowed === '*') || in_array((string)$telegramId, explode(',', $allowed));
     }
 
     private function processViaLangflow(string $text): array
     {
         $currentDate = now()->toIso8601String();
-
         $flowId = env('LANGFLOW_FLOW_ID');
+        $response = Http::withHeaders(['x-api-key' => env('LANGFLOW_API_KEY')])
+            ->post("http://langflow:7860/api/v1/run/{$flowId}", [
+                'input_value' => $text,
+                'input_type'  => 'chat',
+                'output_type' => 'chat',
+                'tweaks'      => ['New Flow' => ['data_atual' => $currentDate]]
+            ]);
 
-        $langflowUrl = "http://langflow:7860/api/v1/run/{$flowId}";
+        if (!$response->successful()) throw new \Exception("Falha Langflow.");
 
-        $response = Http::withHeaders([
-            'x-api-key' => env('LANGFLOW_API_KEY')
-        ])->post($langflowUrl, [
-            'input_value' => $text,
-            'input_type'  => 'chat',
-            'output_type' => 'chat',
-            'tweaks' => [
-                'New Flow' => [
-                    'data_atual' => $currentDate
-                ]
-            ]
-        ]);
-
-        if (!$response->successful()) {
-            \Illuminate\Support\Facades\Log::error("Erro Langflow: " . $response->body());
-            throw new \Exception("Falha na API do Langflow.");
-        }
-
-        $aiTextResponse = $response->json('outputs.0.outputs.0.results.message.text');
-
-        $cleanJson = preg_replace('/```json\s?|```\s?/', '', $aiTextResponse);
+        $aiText = $response->json('outputs.0.outputs.0.results.message.text');
+        $cleanJson = preg_replace('/```json\s?|```\s?/', '', $aiText);
         $decoded = json_decode($cleanJson, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            Log::error("Erro ao decodificar JSON do Langflow: " . json_last_error_msg());
-            throw new \Exception("A IA devolveu um formato inválido.");
-        }
 
         return [
             'intencao'  => $decoded['intencao'] ?? 'gasto',
@@ -399,12 +432,9 @@ class TelegramWebhookController extends Controller
 
     private function sendTelegramMessage(int $chatId, string $text, ?array $replyMarkup = null): void
     {
-        $botToken = env('TELEGRAM_BOT_TOKEN');
-        $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
-
         $payload = [
-            'chat_id'    => $chatId,
-            'text'       => $text,
+            'chat_id' => $chatId,
+            'text' => $text,
             'parse_mode' => 'Markdown'
         ];
 
@@ -412,19 +442,24 @@ class TelegramWebhookController extends Controller
             $payload['reply_markup'] = $replyMarkup;
         }
 
-        Http::post($url, $payload);
+        Http::post("https://api.telegram.org/bot{$this->botToken}/sendMessage", $payload);
     }
 
     private function editTelegramMessage(int $chatId, int $messageId, string $text): void
     {
-        $botToken = env('TELEGRAM_BOT_TOKEN');
-        $url = "https://api.telegram.org/bot{$botToken}/editMessageText";
-
-        Http::post($url, [
-            'chat_id'    => $chatId,
+        Http::post("https://api.telegram.org/bot{$this->botToken}/editMessageText", [
+            'chat_id' => $chatId,
             'message_id' => $messageId,
-            'text'       => $text,
+            'text' => $text,
             'parse_mode' => 'Markdown'
+        ]);
+    }
+
+    private function sendChatAction(int $chatId, string $action = 'typing'): void
+    {
+        Http::post("https://api.telegram.org/bot{$this->botToken}/sendChatAction", [
+            'chat_id' => $chatId,
+            'action'  => $action
         ]);
     }
 }
