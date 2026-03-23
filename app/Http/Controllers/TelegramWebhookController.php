@@ -16,7 +16,6 @@ class TelegramWebhookController extends Controller
 
     public function __construct()
     {
-        // Centralizando a chamada da variável de ambiente (Refatoração 4)
         $this->botToken = env('TELEGRAM_BOT_TOKEN');
     }
 
@@ -42,13 +41,11 @@ class TelegramWebhookController extends Controller
         $extractedData = null;
 
         if (isset($message['photo'])) {
-            // Refatoração 3: Ação visual correta (upload de foto)
             $this->sendChatAction($chatId, 'upload_photo');
             $photoPath = null;
-            
+
             try {
                 $photo = end($message['photo']);
-                // Refatoração 2: Usando o método unificado de download
                 $photoPath = $this->downloadTelegramFile($photo['file_id'], 'photo', 'jpg');
                 $extractedData = $this->processImageWithGemini($photoPath);
             } catch (\Exception $e) {
@@ -56,19 +53,16 @@ class TelegramWebhookController extends Controller
                 $this->sendTelegramMessage($chatId, "❌ Erro ao analisar a imagem. Certifique-se de que o comprovante está legível.");
                 return response()->json(['status' => 'success']);
             } finally {
-                // Refatoração 1: Prevenção de lixo garantida no finally
                 if ($photoPath && file_exists($photoPath)) {
                     unlink($photoPath);
                 }
             }
         } elseif (isset($message['voice'])) {
-            // Refatoração 3: Ação visual correta (gravando áudio)
             $this->sendChatAction($chatId, 'record_voice');
             $audioPath = null;
-            
+
             try {
                 $fileId = $message['voice']['file_id'];
-                // Refatoração 2: Usando o método unificado de download
                 $audioPath = $this->downloadTelegramFile($fileId, 'audio', 'ogg');
                 $text = $this->transcribeAudio($audioPath);
                 $extractedData = $this->processViaLangflow($text);
@@ -77,7 +71,6 @@ class TelegramWebhookController extends Controller
                 $this->sendTelegramMessage($chatId, "❌ Erro ao converter o áudio para texto.");
                 return response()->json(['status' => 'success']);
             } finally {
-                // Refatoração 1: Prevenção de lixo garantida no finally
                 if ($audioPath && file_exists($audioPath)) {
                     unlink($audioPath);
                 }
@@ -90,9 +83,8 @@ class TelegramWebhookController extends Controller
                 return response()->json(['status' => 'success']);
             }
 
-            // Refatoração 3: Ação visual correta (digitando texto) apenas se não for comando
             $this->sendChatAction($chatId, 'typing');
-            
+
             try {
                 $extractedData = $this->processViaLangflow($text);
             } catch (\Exception $e) {
@@ -101,11 +93,9 @@ class TelegramWebhookController extends Controller
                 return response()->json(['status' => 'success']);
             }
         } else {
-            // Ignora silenciosamente outros tipos de mensagens (stickers, arquivos, localização)
             return response()->json(['status' => 'ok']);
         }
 
-        // Fluxo de Persistência Base
         if ($extractedData) {
             try {
                 $intencao = $extractedData['intencao'] ?? 'gasto';
@@ -350,11 +340,33 @@ class TelegramWebhookController extends Controller
             ->whereBetween('data', [now()->startOfMonth()->toDateString(), now()->endOfMonth()->toDateString()])
             ->sum('valor');
 
-        $percentual = ($somaAtual / $budget->limite) * 100;
-        if ($percentual >= 100) {
-            $this->sendTelegramMessage($chatId, "🛑 *Limite Estourado! ({$categoria})*\nVocê ultrapassou sua meta.");
-        } elseif ($percentual >= 90) {
-            $this->sendTelegramMessage($chatId, "⚠️ *Atenção! ({$categoria})*\nVocê atingiu " . number_format($percentual, 0) . "% da meta.");
+        $somaAnterior = $somaAtual - $valorGastoAgora;
+
+        $percentualAtual = ($somaAtual / $budget->limite) * 100;
+        $percentualAnterior = ($somaAnterior / $budget->limite) * 100;
+
+        $limiteFmt = number_format($budget->limite, 2, ',', '.');
+        $consumidoFmt = number_format($somaAtual, 2, ',', '.');
+        $percentualFmt = number_format($percentualAtual, 1);
+
+        $cruzou50  = ($percentualAtual >= 50 && $percentualAnterior < 50);
+        $cruzou75  = ($percentualAtual >= 75 && $percentualAnterior < 75);
+        $cruzou90  = ($percentualAtual >= 90 && $percentualAnterior < 90);
+        $cruzou100 = ($percentualAtual >= 100 && $percentualAnterior < 100);
+
+        $continuouEstourado = ($percentualAtual > 100 && $percentualAnterior >= 100);
+
+        if ($cruzou100) {
+            $this->sendTelegramMessage($chatId, "🛑 *Limite Estourado! ({$categoria})*\nVocê acabou de ultrapassar sua meta de R$ {$limiteFmt}.\nTotal consumido: R$ {$consumidoFmt} ({$percentualFmt}%).");
+        } elseif ($continuouEstourado) {
+            $this->sendTelegramMessage($chatId, "🚨 *Atenção Máxima! ({$categoria})*\nVocê já havia estourado a meta e continua gastando!\nTotal consumido: R$ {$consumidoFmt} ({$percentualFmt}% de R$ {$limiteFmt}).");
+        } elseif ($cruzou90) {
+            $saldoRestante = number_format($budget->limite - $somaAtual, 2, ',', '.');
+            $this->sendTelegramMessage($chatId, "⚠️ *Quase lá! ({$categoria})*\nVocê atingiu {$percentualFmt}% da sua meta (R$ {$limiteFmt}).\nFaltam apenas R$ {$saldoRestante} para estourar.");
+        } elseif ($cruzou75) {
+            $this->sendTelegramMessage($chatId, "⚠️ *Atenção! ({$categoria})*\nVocê já consumiu {$percentualFmt}% da sua meta mensal de R$ {$limiteFmt}.");
+        } elseif ($cruzou50) {
+            $this->sendTelegramMessage($chatId, "⚠️ *Metade da meta! ({$categoria})*\nVocê chegou a {$percentualFmt}% do limite de R$ {$limiteFmt}.");
         }
     }
 
