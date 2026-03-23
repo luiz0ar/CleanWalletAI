@@ -3,9 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\Expense;
+use App\Models\Budget;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use Carbon\Carbon;
 
 class TelegramWebhookController extends Controller
 {
@@ -42,7 +45,6 @@ class TelegramWebhookController extends Controller
                 if (file_exists($audioPath)) {
                     unlink($audioPath);
                 }
-
             } catch (\Exception $e) {
                 Log::error("Erro no áudio: " . $e->getMessage());
                 $this->sendTelegramMessage($chatId, "❌ Erro ao converter o áudio para texto.");
@@ -61,38 +63,78 @@ class TelegramWebhookController extends Controller
             $extractedData = $this->processViaLangflow($text);
             $intencao = $extractedData['intencao'] ?? 'gasto';
 
+            if ($intencao === 'meta') {
+                $this->saveBudget($extractedData, $telegramId, $chatId);
+                return response()->json(['status' => 'success']);
+            }
+
             if ($intencao === 'relatorio') {
                 $this->generateReport($extractedData, $telegramId, $chatId);
                 return response()->json(['status' => 'success']);
             }
 
             $categoriaFinal = !empty($extractedData['categoria']) ? ucfirst($extractedData['categoria']) : 'Outros';
+            $parcelas = (int) ($extractedData['parcelas'] ?? 1);
+            $valorTotal = floatval($extractedData['valor'] ?? 0);
+            $dataBase = Carbon::parse($extractedData['data'] ?? now());
 
-            $expense = Expense::create([
-                'telegram_id' => $telegramId,
-                'valor'       => $extractedData['valor'],
-                'categoria'   => $categoriaFinal,
-                'descricao'   => $extractedData['descricao'],
-                'data'        => $extractedData['data'],
-                'tipo'        => ($intencao === 'receita') ? 'receita' : 'despesa',
-            ]);
+            if ($parcelas > 1 && $intencao === 'gasto') {
+                $groupId = (string) Str::uuid();
+                $valorParcela = $valorTotal / $parcelas;
 
-            $valorFormatado = number_format($expense->valor, 2, ',', '.');
-            $descricaoStr = $expense->descricao ? ucfirst($expense->descricao) : 'Sem descrição';
-            $emoji = ($expense->tipo === 'receita') ? '💰' : '💸';
-            $prefixo = ($expense->tipo === 'receita') ? 'Receita' : 'Despesa';
+                for ($i = 0; $i < $parcelas; $i++) {
+                    $dataParcela = $dataBase->copy()->addMonths($i);
+                    $numParcela = $i + 1;
 
-            $mensagemSucesso = "✅ *{$prefixo} Salva*\n{$emoji} R$ {$valorFormatado}\n {$descricaoStr}\n {$expense->categoria}";
+                    Expense::create([
+                        'telegram_id'   => $telegramId,
+                        'valor'         => $valorParcela,
+                        'categoria'     => $categoriaFinal,
+                        'descricao'     => ($extractedData['descricao'] ?? 'Sem descrição') . " ({$numParcela}/{$parcelas})",
+                        'data'          => $dataParcela->toDateString(),
+                        'tipo'          => 'despesa',
+                        'parcelas'      => $parcelas,
+                        'valor_total'   => $valorTotal,
+                        'valor_parcela' => $valorParcela,
+                        'group_id'      => $groupId,
+                    ]);
+                }
+                $valorFormatado = number_format($valorParcela, 2, ',', '.');
+                $totalFormatado = number_format($valorTotal, 2, ',', '.');
+                $mensagemSucesso = "✅ *Compra Parcelada Salva*\n💸 {$parcelas}x de R$ {$valorFormatado}\n💰 Total: R$ {$totalFormatado}\n📝 {$extractedData['descricao']}\n🏷️ {$categoriaFinal}";
 
-            $buttons = [
-                'inline_keyboard' => [
-                    [
-                        ['text' => '🗑️ Desfazer', 'callback_data' => "undo_{$expense->_id}"]
-                    ]
-                ]
-            ];
+                $buttons = [
+                    'inline_keyboard' => [[['text' => '🗑️ Desfazer Tudo', 'callback_data' => "undo_group_{$groupId}"]]]
+                ];
+                $this->sendTelegramMessage($chatId, $mensagemSucesso, $buttons);
+                $this->checkBudgetLimit($telegramId, $categoriaFinal, $chatId, $valorParcela);
+            } else {
+                $expense = Expense::create([
+                    'telegram_id' => $telegramId,
+                    'valor'       => $valorTotal,
+                    'categoria'   => $categoriaFinal,
+                    'descricao'   => $extractedData['descricao'],
+                    'data'        => $dataBase->toDateString(),
+                    'tipo'        => ($intencao === 'receita') ? 'receita' : 'despesa',
+                ]);
 
-            $this->sendTelegramMessage($chatId, $mensagemSucesso, $buttons);
+                $valorFormatado = number_format($expense->valor, 2, ',', '.');
+                $descricaoStr = $expense->descricao ? ucfirst($expense->descricao) : 'Sem descrição';
+                $emoji = ($expense->tipo === 'receita') ? '💰' : '💸';
+                $prefixo = ($expense->tipo === 'receita') ? 'Receita' : 'Despesa';
+
+                $mensagemSucesso = "✅ *{$prefixo} Salva*\n{$emoji} R$ {$valorFormatado}\n📝 {$descricaoStr}\n🏷️ {$expense->categoria}";
+
+                $buttons = [
+                    'inline_keyboard' => [[['text' => '🗑️ Desfazer', 'callback_data' => "undo_{$expense->_id}"]]]
+                ];
+
+                $this->sendTelegramMessage($chatId, $mensagemSucesso, $buttons);
+
+                if ($expense->tipo === 'despesa') {
+                    $this->checkBudgetLimit($telegramId, $expense->categoria, $chatId, $expense->valor);
+                }
+            }
         } catch (\Exception $e) {
             Log::error("Erro ao processar mensagem: " . $e->getMessage());
             $this->sendTelegramMessage($chatId, "❌ Ocorreu um erro ao processar sua solicitação.");
@@ -101,28 +143,79 @@ class TelegramWebhookController extends Controller
         return response()->json(['status' => 'success']);
     }
 
-    /**
-     * Trata cliques em botões inline
-     */
     private function handleCallbackQuery(array $callbackQuery)
     {
         $data = $callbackQuery['data'];
         $chatId = $callbackQuery['message']['chat']['id'];
         $messageId = $callbackQuery['message']['message_id'];
 
-        if (strpos($data, 'undo_') === 0) {
+        if (strpos($data, 'undo_group_') === 0) {
+            $groupId = str_replace('undo_group_', '', $data);
+            Expense::where('group_id', $groupId)->delete();
+            $this->editTelegramMessage($chatId, $messageId, "🗑️ *Parcelas Canceladas*\nTodos os lançamentos do grupo foram removidos.");
+        } elseif (strpos($data, 'undo_') === 0) {
             $id = str_replace('undo_', '', $data);
             $expense = Expense::find($id);
 
             if ($expense) {
+                $valor = number_format($expense->valor, 2, ',', '.');
                 $expense->delete();
-                $this->editTelegramMessage($chatId, $messageId, "🗑️ *Registro Cancelado*\nO valor de R$ " . number_format($expense->valor, 2, ',', '.') . " em {$expense->categoria} foi apagado.");
+                $this->editTelegramMessage($chatId, $messageId, "🗑️ *Registro Cancelado*\nO lançamento de R$ {$valor} foi removido.");
             } else {
-                $this->editTelegramMessage($chatId, $messageId, "⚠️ *Aviso*\nEste registro já foi desfeito ou não existe mais.");
+                $this->editTelegramMessage($chatId, $messageId, "⚠️ Este registro já foi removido.");
             }
         }
 
         return response()->json(['status' => 'success']);
+    }
+
+    private function saveBudget(array $extractedData, $telegramId, $chatId)
+    {
+        $categoria = ucfirst($extractedData['categoria'] ?? 'Geral');
+        $limite = floatval($extractedData['valor'] ?? 0);
+
+        Budget::updateOrCreate(
+            ['telegram_id' => $telegramId, 'categoria' => $categoria],
+            ['limite' => $limite]
+        );
+
+        $valorFmt = number_format($limite, 2, ',', '.');
+        $this->sendTelegramMessage($chatId, "🎯 *Meta Definida!*\nSeu limite mensal para {$categoria} agora é R$ {$valorFmt}.");
+    }
+
+    private function checkBudgetLimit($telegramId, $categoria, $chatId, $valorGastoAgora = 0)
+    {
+        $budget = Budget::where('telegram_id', $telegramId)->where('categoria', $categoria)->first();
+
+        if (!$budget || $budget->limite <= 0) {
+            return;
+        }
+
+        $somaAtual = Expense::where('telegram_id', $telegramId)
+            ->where('categoria', $categoria)
+            ->where('tipo', 'despesa')
+            ->whereBetween('data', [now()->startOfMonth()->toDateString(), now()->endOfMonth()->toDateString()])
+            ->sum('valor');
+
+        $somaAnterior = $somaAtual - $valorGastoAgora;
+
+        $percentualAtual = ($somaAtual / $budget->limite) * 100;
+        $percentualAnterior = ($somaAnterior / $budget->limite) * 100;
+
+        $limiteFmt = number_format($budget->limite, 2, ',', '.');
+        $consumidoFmt = number_format($somaAtual, 2, ',', '.');
+        $percentualFmt = number_format($percentualAtual, 1);
+
+        $cruzou50  = ($percentualAtual >= 50 && $percentualAnterior < 50);
+        $cruzou75  = ($percentualAtual >= 75 && $percentualAnterior < 75);
+        $cruzou90  = ($percentualAtual >= 90 && $percentualAnterior < 90);
+        $cruzou100 = ($percentualAtual >= 100 && $percentualAnterior < 100);
+
+        if ($cruzou100) {
+            $this->sendTelegramMessage($chatId, "🛑 *Limite Estourado! ({$categoria})*\nVocê ultrapassou sua meta de R$ {$limiteFmt}.\nTotal consumido: R$ {$consumidoFmt}.");
+        } elseif ($cruzou50 || $cruzou75 || $cruzou90) {
+            $this->sendTelegramMessage($chatId, "⚠️ *Atenção! ({$categoria})*\nVocê já consumiu {$percentualFmt}% da sua meta mensal (R$ {$limiteFmt}).\nTotal consumido: R$ {$consumidoFmt}.");
+        }
     }
 
     private function downloadTelegramAudio(string $fileId): string
@@ -172,9 +265,6 @@ class TelegramWebhookController extends Controller
         return $response->json('text');
     }
 
-    /**
-     * Remove o último registro do usuário (via comando /desfazer)
-     */
     private function undoLastExpense($telegramId, $chatId)
     {
         $lastExpense = Expense::where('telegram_id', $telegramId)->latest('created_at')->first();
@@ -188,9 +278,6 @@ class TelegramWebhookController extends Controller
         $this->sendTelegramMessage($chatId, "Desfeito! O registro de R$ " . number_format($lastExpense->valor, 2, ',', '.') . " em '{$lastExpense->categoria}' foi apagado.");
     }
 
-    /**
-     * Gera os relatórios baseados na extração da IA
-     */
     private function generateReport(array $extractedData, $telegramId, $chatId)
     {
         $query = Expense::where('telegram_id', $telegramId);
@@ -243,9 +330,9 @@ class TelegramWebhookController extends Controller
             $saldo = $totalReceitas - $totalDespesas;
 
             $mensagem .= "\n-------------------\n";
-            $mensagem .= "🟢 *Entradas:* R$ " . number_format($totalReceitas, 2, ',', '.') . "\n";
-            $mensagem .= "🔴 *Saídas:* R$ " . number_format($totalDespesas, 2, ',', '.') . "\n";
-            $mensagem .= "💰 *Saldo Líquido:* R$ " . number_format($saldo, 2, ',', '.');
+            $mensagem .= "🟢 Entradas: R$ " . number_format($totalReceitas, 2, ',', '.') . "\n";
+            $mensagem .= "🔴 Saídas: R$ " . number_format($totalDespesas, 2, ',', '.') . "\n";
+            $mensagem .= "💰 Saldo Líquido: R$ " . number_format($saldo, 2, ',', '.');
         }
 
         $this->sendTelegramMessage($chatId, $mensagem);
@@ -291,7 +378,7 @@ class TelegramWebhookController extends Controller
 
         $aiTextResponse = $response->json('outputs.0.outputs.0.results.message.text');
 
-        $cleanJson = preg_replace('/```json\s?|\s?```/', '', $aiTextResponse);
+        $cleanJson = preg_replace('/```json\s?|```\s?/', '', $aiTextResponse);
         $decoded = json_decode($cleanJson, true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
@@ -302,10 +389,11 @@ class TelegramWebhookController extends Controller
         return [
             'intencao'  => $decoded['intencao'] ?? 'gasto',
             'valor'     => floatval($decoded['valor'] ?? 0),
-            'categoria' => $decoded['categoria'] ?? 'Outros',
+            'categoria' => $decoded['categoria'] ?? null,
             'descricao' => $decoded['descricao'] ?? null,
             'data'      => $decoded['data'] ?? now()->toDateString(),
             'periodo'   => $decoded['periodo'] ?? 'mes',
+            'parcelas'  => $decoded['parcelas'] ?? 1,
         ];
     }
 

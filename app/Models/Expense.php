@@ -17,5 +17,9 @@ class Expense extends Model
         'descricao',
         'data',
         'tipo',
+        'parcelas',
+        'valor_total',
+        'valor_parcela',
+        'group_id',
     ];
 }
