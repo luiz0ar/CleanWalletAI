@@ -6,9 +6,9 @@ CleanWalletAI é um assistente financeiro inteligente para Telegram, construído
 
 ## ✨ Funcionalidades Principais
 
-### 1. 📸 Visão Cognitiva Multimodal (Nível 3)
+### 1. 📸 Visão Cognitiva Multimodal
 Envie fotos de cupons fiscais, boletos, comprovantes de Pix ou extratos bancários:
-- **Como funciona:** O bot utiliza o **Google Gemini 1.5 Flash** para realizar a extração cognitiva da imagem.
+- **Como funciona:** O bot utiliza o **Google Gemini 2.5 Flash** para realizar a extração cognitiva da imagem.
 - **Dados Extraídos:** Identifica automaticamente o Valor Total, Estabelecimento (Descrição), Data e Categoria.
 - **Fluxo Unificado:** Dados extraídos de imagens seguem a mesma lógica do texto, incluindo parcelamentos e alertas de orçamento.
 
