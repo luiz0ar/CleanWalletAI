@@ -16,5 +16,6 @@ class Expense extends Model
         'categoria',
         'descricao',
         'data',
+        'tipo',
     ];
 }
