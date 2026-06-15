@@ -423,12 +423,13 @@ class TelegramWebhookController extends Controller
 
         $response = Http::withHeaders([
             'Content-Type' => 'application/json',
-        ])->post($url, [
-            'input_value' => $text,
-            'input_type'  => 'chat',
-            'output_type' => 'chat',
-            'tweaks'      => ['New Flow' => ['data_atual' => $currentDate]]
-        ]);
+        ])->timeout(90)
+            ->post($url, [
+                'input_value' => $text,
+                'input_type'  => 'chat',
+                'output_type' => 'chat',
+                'tweaks'      => ['New Flow' => ['data_atual' => $currentDate]]
+            ]);
 
         if (!$response->successful()) {
             Log::error("Falha no Langflow API. Status: " . $response->status() . " - Resposta: " . $response->body());
