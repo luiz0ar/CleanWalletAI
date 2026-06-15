@@ -17,17 +17,15 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
 
-# Create app user
+COPY . .
+
+RUN composer install --no-interaction --optimize-autoloader --no-dev
+
 RUN groupadd -g 1000 www && useradd -u 1000 -ms /bin/bash -g www www
-
-# Copy entrypoint script (optional)
-
-# During build, create a fresh Laravel project (if not mounting code)
-# This step may be heavy; you can prefer mounting a host project instead.
-RUN composer create-project --prefer-dist laravel/laravel="11.*" . --no-interaction || true
-
-# Set permissions
 RUN chown -R www:www /var/www/html
+RUN chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
 
-EXPOSE 9000
-CMD ["php-fpm"]
+USER www
+
+EXPOSE 80
+CMD ["sh", "-c", "php -S 0.0.0.0:${PORT:-80} -t public"]
