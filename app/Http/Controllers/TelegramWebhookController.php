@@ -415,19 +415,33 @@ class TelegramWebhookController extends Controller
 
     private function processViaLangflow(string $text): array
     {
-        $currentDate = now()->toIso8601String();
+        $baseUrl = rtrim(env('LANGFLOW_URL', 'http://localhost:8000'), '/');
         $flowId = env('LANGFLOW_FLOW_ID');
-        $response = Http::withHeaders(['x-api-key' => env('LANGFLOW_API_KEY')])
-            ->post("http://langflow:7860/api/v1/run/{$flowId}", [
-                'input_value' => $text,
-                'input_type'  => 'chat',
-                'output_type' => 'chat',
-                'tweaks'      => ['New Flow' => ['data_atual' => $currentDate]]
-            ]);
+        $currentDate = now()->toIso8601String();
 
-        if (!$response->successful()) throw new \Exception("Falha Langflow.");
+        $url = "{$baseUrl}/api/v1/run/{$flowId}?stream=false";
 
-        $aiText = $response->json('outputs.0.outputs.0.results.message.text');
+        $response = Http::withHeaders([
+            'Content-Type' => 'application/json',
+        ])->post($url, [
+            'input_value' => $text,
+            'input_type'  => 'chat',
+            'output_type' => 'chat',
+            'tweaks'      => ['New Flow' => ['data_atual' => $currentDate]]
+        ]);
+
+        if (!$response->successful()) {
+            Log::error("Falha no Langflow API. Status: " . $response->status() . " - Resposta: " . $response->body());
+            throw new \Exception("Falha ao obter resposta do motor de IA.");
+        }
+
+        $aiText = $response->json('outputs.0.outputs.0.results.message.data.text');
+
+        if (!$aiText) {
+            Log::error("Langflow retornou uma estrutura de texto vazia. JSON completo: " . json_encode($response->json()));
+            throw new \Exception("A IA não gerou uma resposta válida.");
+        }
+
         $cleanJson = preg_replace('/```json\s?|```\s?/', '', $aiText);
         $decoded = json_decode($cleanJson, true);
 
