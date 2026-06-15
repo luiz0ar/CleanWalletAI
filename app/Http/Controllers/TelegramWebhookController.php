@@ -21,6 +21,17 @@ class TelegramWebhookController extends Controller
 
     public function handle(Request $request)
     {
+        $updateId = $request->input('update_id');
+
+        if ($updateId) {
+            $isFirstRequest = Cache::add("telegram_update_{$updateId}", true, 120);
+
+            if (!$isFirstRequest) {
+                Log::info("Telegram Update {$updateId} duplicado ignorado por idempotência.");
+                return response()->json(['status' => 'duplicate_ignored']);
+            }
+        }
+
         if ($request->has('callback_query')) {
             return $this->handleCallbackQuery($request->input('callback_query'));
         }
@@ -416,8 +427,8 @@ class TelegramWebhookController extends Controller
     private function processViaLangflow(string $text): array
     {
         $baseUrl = rtrim(env('LANGFLOW_URL', 'http://localhost:8000'), '/');
-        $flowId = env('LANGFLOW_FLOW_ID');
         $currentDate = now()->toIso8601String();
+        $flowId = env('LANGFLOW_FLOW_ID');
 
         $url = "{$baseUrl}/api/v1/run/{$flowId}?stream=false";
 
@@ -433,13 +444,13 @@ class TelegramWebhookController extends Controller
 
         if (!$response->successful()) {
             Log::error("Falha no Langflow API. Status: " . $response->status() . " - Resposta: " . $response->body());
-            throw new \Exception("Falha ao obter resposta do motor de IA.");
+            throw new \Exception("Falha Langflow.");
         }
 
         $aiText = $response->json('outputs.0.outputs.0.results.message.data.text');
 
         if (!$aiText) {
-            Log::error("Langflow retornou uma estrutura de texto vazia. JSON completo: " . json_encode($response->json()));
+            Log::error("Langflow retornou uma estrutura de texto vazia.");
             throw new \Exception("A IA não gerou uma resposta válida.");
         }
 
