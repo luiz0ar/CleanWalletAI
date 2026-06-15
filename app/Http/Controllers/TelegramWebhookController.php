@@ -25,10 +25,10 @@ class TelegramWebhookController extends Controller
         $updateId = $request->input('update_id');
 
         if ($updateId) {
-            $isFirstRequest = Cache::add("telegram_update_{$updateId}", true, 120);
+            $alreadyProcessed = Expense::where('telegram_update_id', (string)$updateId)->exists();
 
-            if (!$isFirstRequest) {
-                Log::info("Telegram Update {$updateId} duplicado ignorado por idempotência.");
+            if ($alreadyProcessed) {
+                Log::info("Telegram Update {$updateId} duplicado bloqueado nativamente pelo banco.");
                 return response()->json(['status' => 'duplicate_ignored']);
             }
         }
@@ -137,6 +137,7 @@ class TelegramWebhookController extends Controller
 
                         Expense::create([
                             'telegram_id'   => $telegramId,
+                            'telegram_update_id' => (string)$updateId,
                             'valor'         => $valorParcela,
                             'categoria'     => $categoriaFinal,
                             'descricao'     => ($extractedData['descricao'] ?? 'Sem descrição') . " ({$numParcela}/{$parcelas})",
@@ -159,6 +160,7 @@ class TelegramWebhookController extends Controller
                 } else {
                     $expense = Expense::create([
                         'telegram_id' => $telegramId,
+                        'telegram_update_id' => (string)$updateId,
                         'valor'       => $valorTotal,
                         'categoria'   => $categoriaFinal,
                         'descricao'   => $extractedData['descricao'] ?? 'Registro via Imagem/Voz',
