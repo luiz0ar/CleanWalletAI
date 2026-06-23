@@ -2,14 +2,13 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Expense;
 use App\Models\Budget;
+use App\Models\Expense;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Cache;
-use Carbon\Carbon;
 
 class TelegramWebhookController extends Controller
 {
@@ -25,10 +24,11 @@ class TelegramWebhookController extends Controller
         $updateId = $request->input('update_id');
 
         if ($updateId) {
-            $alreadyProcessed = Expense::where('telegram_update_id', (string)$updateId)->exists();
+            $alreadyProcessed = Expense::where('telegram_update_id', (string) $updateId)->exists();
 
             if ($alreadyProcessed) {
                 Log::info("Telegram Update {$updateId} duplicado bloqueado nativamente pelo banco.");
+
                 return response()->json(['status' => 'duplicate_ignored']);
             }
         }
@@ -38,15 +38,16 @@ class TelegramWebhookController extends Controller
         }
 
         $message = $request->input('message');
-        if (!$message) {
+        if (! $message) {
             return response()->json(['status' => 'ok']);
         }
 
         $telegramId = $message['from']['id'];
         $chatId = $message['chat']['id'];
 
-        if (!$this->isUserAllowed($telegramId)) {
+        if (! $this->isUserAllowed($telegramId)) {
             Log::warning("Tentativa de acesso não autorizada. Telegram ID: {$telegramId}");
+
             return response()->json(['status' => 'forbidden']);
         }
 
@@ -61,8 +62,9 @@ class TelegramWebhookController extends Controller
                 $photoPath = $this->downloadTelegramFile($photo['file_id'], 'photo', 'jpg');
                 $extractedData = $this->processImageWithGemini($photoPath);
             } catch (\Exception $e) {
-                Log::error("Erro no processamento de imagem: " . $e->getMessage());
-                $this->sendTelegramMessage($chatId, "❌ Erro ao analisar a imagem. Certifique-se de que o comprovante está legível.");
+                Log::error('Erro no processamento de imagem: '.$e->getMessage());
+                $this->sendTelegramMessage($chatId, '❌ Erro ao analisar a imagem. Certifique-se de que o comprovante está legível.');
+
                 return response()->json(['status' => 'success']);
             } finally {
                 if ($photoPath && file_exists($photoPath)) {
@@ -79,8 +81,9 @@ class TelegramWebhookController extends Controller
                 $text = $this->transcribeAudio($audioPath);
                 $extractedData = $this->processViaLangflow($text);
             } catch (\Exception $e) {
-                Log::error("Erro no áudio: " . $e->getMessage());
-                $this->sendTelegramMessage($chatId, "❌ Erro ao converter o áudio para texto.");
+                Log::error('Erro no áudio: '.$e->getMessage());
+                $this->sendTelegramMessage($chatId, '❌ Erro ao converter o áudio para texto.');
+
                 return response()->json(['status' => 'success']);
             } finally {
                 if ($audioPath && file_exists($audioPath)) {
@@ -92,6 +95,7 @@ class TelegramWebhookController extends Controller
 
             if (trim(strtolower($text)) === '/desfazer') {
                 $this->undoLastExpense($telegramId, $chatId);
+
                 return response()->json(['status' => 'success']);
             }
 
@@ -100,8 +104,9 @@ class TelegramWebhookController extends Controller
             try {
                 $extractedData = $this->processViaLangflow($text);
             } catch (\Exception $e) {
-                Log::error("Erro Langflow: " . $e->getMessage());
-                $this->sendTelegramMessage($chatId, "❌ Erro ao processar o texto.");
+                Log::error('Erro Langflow: '.$e->getMessage());
+                $this->sendTelegramMessage($chatId, '❌ Erro ao processar o texto.');
+
                 return response()->json(['status' => 'success']);
             }
         } else {
@@ -114,15 +119,17 @@ class TelegramWebhookController extends Controller
 
                 if ($intencao === 'meta') {
                     $this->saveBudget($extractedData, $telegramId, $chatId);
+
                     return response()->json(['status' => 'success']);
                 }
 
                 if ($intencao === 'relatorio') {
                     $this->generateReport($extractedData, $telegramId, $chatId);
+
                     return response()->json(['status' => 'success']);
                 }
 
-                $categoriaFinal = !empty($extractedData['categoria']) ? ucfirst($extractedData['categoria']) : 'Outros';
+                $categoriaFinal = ! empty($extractedData['categoria']) ? ucfirst($extractedData['categoria']) : 'Outros';
                 $parcelas = (int) ($extractedData['parcelas'] ?? 1);
                 $valorTotal = floatval($extractedData['valor'] ?? 0);
                 $dataBase = Carbon::parse($extractedData['data'] ?? now());
@@ -136,17 +143,17 @@ class TelegramWebhookController extends Controller
                         $numParcela = $i + 1;
 
                         Expense::create([
-                            'telegram_id'   => $telegramId,
-                            'telegram_update_id' => (string)$updateId,
-                            'valor'         => $valorParcela,
-                            'categoria'     => $categoriaFinal,
-                            'descricao'     => ($extractedData['descricao'] ?? 'Sem descrição') . " ({$numParcela}/{$parcelas})",
-                            'data'          => $dataParcela->toDateString(),
-                            'tipo'          => 'despesa',
-                            'parcelas'      => $parcelas,
-                            'valor_total'   => $valorTotal,
+                            'telegram_id' => $telegramId,
+                            'telegram_update_id' => (string) $updateId,
+                            'valor' => $valorParcela,
+                            'categoria' => $categoriaFinal,
+                            'descricao' => ($extractedData['descricao'] ?? 'Sem descrição')." ({$numParcela}/{$parcelas})",
+                            'data' => $dataParcela->toDateString(),
+                            'tipo' => 'despesa',
+                            'parcelas' => $parcelas,
+                            'valor_total' => $valorTotal,
                             'valor_parcela' => $valorParcela,
-                            'group_id'      => $groupId,
+                            'group_id' => $groupId,
                         ]);
                     }
 
@@ -160,12 +167,12 @@ class TelegramWebhookController extends Controller
                 } else {
                     $expense = Expense::create([
                         'telegram_id' => $telegramId,
-                        'telegram_update_id' => (string)$updateId,
-                        'valor'       => $valorTotal,
-                        'categoria'   => $categoriaFinal,
-                        'descricao'   => $extractedData['descricao'] ?? 'Registro via Imagem/Voz',
-                        'data'        => $dataBase->toDateString(),
-                        'tipo'        => ($intencao === 'receita') ? 'receita' : 'despesa',
+                        'telegram_update_id' => (string) $updateId,
+                        'valor' => $valorTotal,
+                        'categoria' => $categoriaFinal,
+                        'descricao' => $extractedData['descricao'] ?? 'Registro via Imagem/Voz',
+                        'data' => $dataBase->toDateString(),
+                        'tipo' => ($intencao === 'receita') ? 'receita' : 'despesa',
                     ]);
 
                     $valorFmt = number_format($expense->valor, 2, ',', '.');
@@ -183,8 +190,8 @@ class TelegramWebhookController extends Controller
                     }
                 }
             } catch (\Exception $e) {
-                Log::error("Erro na persistência: " . $e->getMessage());
-                $this->sendTelegramMessage($chatId, "❌ Erro ao salvar os dados extraídos.");
+                Log::error('Erro na persistência: '.$e->getMessage());
+                $this->sendTelegramMessage($chatId, '❌ Erro ao salvar os dados extraídos.');
             }
         }
 
@@ -226,22 +233,22 @@ class TelegramWebhookController extends Controller
                         [
                             'inline_data' => [
                                 'mime_type' => 'image/jpeg',
-                                'data' => $base64Image
-                            ]
-                        ]
-                    ]
-                ]
+                                'data' => $base64Image,
+                            ],
+                        ],
+                    ],
+                ],
             ],
             'generationConfig' => [
-                'response_mime_type' => 'application/json'
-            ]
+                'response_mime_type' => 'application/json',
+            ],
         ];
 
         $response = Http::post($url, $payload);
 
-        if (!$response->successful()) {
-            Log::error("Erro Gemini API: " . $response->body());
-            throw new \Exception("Falha na comunicação com Gemini Vision.");
+        if (! $response->successful()) {
+            Log::error('Erro Gemini API: '.$response->body());
+            throw new \Exception('Falha na comunicação com Gemini Vision.');
         }
 
         $result = $response->json();
@@ -251,18 +258,18 @@ class TelegramWebhookController extends Controller
         $decoded = json_decode($cleanJson, true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
-            Log::error("Erro JSON Gemini Vision: " . $jsonText);
-            throw new \Exception("A IA de visão devolveu um formato inválido.");
+            Log::error('Erro JSON Gemini Vision: '.$jsonText);
+            throw new \Exception('A IA de visão devolveu um formato inválido.');
         }
 
         return [
-            'intencao'  => $decoded['intencao'] ?? 'gasto',
-            'valor'     => floatval($decoded['valor'] ?? 0),
+            'intencao' => $decoded['intencao'] ?? 'gasto',
+            'valor' => floatval($decoded['valor'] ?? 0),
             'categoria' => $decoded['categoria'] ?? 'Outros',
             'descricao' => $decoded['descricao'] ?? null,
-            'data'      => $decoded['data'] ?? now()->toDateString(),
-            'periodo'   => $decoded['periodo'] ?? 'mes',
-            'parcelas'  => $decoded['parcelas'] ?? 1,
+            'data' => $decoded['data'] ?? now()->toDateString(),
+            'periodo' => $decoded['periodo'] ?? 'mes',
+            'parcelas' => $decoded['parcelas'] ?? 1,
         ];
     }
 
@@ -271,8 +278,8 @@ class TelegramWebhookController extends Controller
     {
         $response = Http::get("https://api.telegram.org/bot{$this->botToken}/getFile", ['file_id' => $fileId]);
 
-        if (!$response->successful() || !isset($response['result']['file_path'])) {
-            throw new \Exception("Falha ao obter path do arquivo no Telegram.");
+        if (! $response->successful() || ! isset($response['result']['file_path'])) {
+            throw new \Exception('Falha ao obter path do arquivo no Telegram.');
         }
 
         $filePath = $response['result']['file_path'];
@@ -293,11 +300,11 @@ class TelegramWebhookController extends Controller
             ->post('https://api.groq.com/openai/v1/audio/transcriptions', [
                 'model' => 'whisper-large-v3-turbo',
                 'response_format' => 'json',
-                'language' => 'pt'
+                'language' => 'pt',
             ]);
 
-        if (!$response->successful()) {
-            throw new \Exception("Falha na API de transcrição.");
+        if (! $response->successful()) {
+            throw new \Exception('Falha na API de transcrição.');
         }
 
         return $response->json('text');
@@ -322,7 +329,7 @@ class TelegramWebhookController extends Controller
                 $expense->delete();
                 $this->editTelegramMessage($chatId, $messageId, "🗑️ *Registro Cancelado*\nO lançamento de R$ {$valor} foi removido.");
             } else {
-                $this->editTelegramMessage($chatId, $messageId, "⚠️ Este registro já foi removido.");
+                $this->editTelegramMessage($chatId, $messageId, '⚠️ Este registro já foi removido.');
             }
         }
 
@@ -346,7 +353,9 @@ class TelegramWebhookController extends Controller
     private function checkBudgetLimit($telegramId, $categoria, $chatId, $valorGastoAgora = 0)
     {
         $budget = Budget::where('telegram_id', $telegramId)->where('categoria', $categoria)->first();
-        if (!$budget || $budget->limite <= 0) return;
+        if (! $budget || $budget->limite <= 0) {
+            return;
+        }
 
         $somaAtual = Expense::where('telegram_id', $telegramId)
             ->where('categoria', $categoria)
@@ -363,9 +372,9 @@ class TelegramWebhookController extends Controller
         $consumidoFmt = number_format($somaAtual, 2, ',', '.');
         $percentualFmt = number_format($percentualAtual, 1);
 
-        $cruzou50  = ($percentualAtual >= 50 && $percentualAnterior < 50);
-        $cruzou75  = ($percentualAtual >= 75 && $percentualAnterior < 75);
-        $cruzou90  = ($percentualAtual >= 90 && $percentualAnterior < 90);
+        $cruzou50 = ($percentualAtual >= 50 && $percentualAnterior < 50);
+        $cruzou75 = ($percentualAtual >= 75 && $percentualAnterior < 75);
+        $cruzou90 = ($percentualAtual >= 90 && $percentualAnterior < 90);
         $cruzou100 = ($percentualAtual >= 100 && $percentualAnterior < 100);
 
         $continuouEstourado = ($percentualAtual > 100 && $percentualAnterior >= 100);
@@ -389,7 +398,7 @@ class TelegramWebhookController extends Controller
         $lastExpense = Expense::where('telegram_id', $telegramId)->latest('created_at')->first();
         if ($lastExpense) {
             $lastExpense->delete();
-            $this->sendTelegramMessage($chatId, "Desfeito! Registro removido.");
+            $this->sendTelegramMessage($chatId, 'Desfeito! Registro removido.');
         }
     }
 
@@ -399,32 +408,33 @@ class TelegramWebhookController extends Controller
         $periodo = $extractedData['periodo'] ?? 'mes';
         $startDate = match ($periodo) {
             'semana' => now()->startOfWeek(),
-            'ano'    => now()->startOfYear(),
-            default  => now()->startOfMonth(),
+            'ano' => now()->startOfYear(),
+            default => now()->startOfMonth(),
         };
 
         $query->where('data', '>=', $startDate->toDateString());
         $despesas = $query->orderBy('data', 'asc')->get();
 
-        $msg = "📊 *Relatório (" . ucfirst($periodo) . ")*\n\n";
+        $msg = '📊 *Relatório ('.ucfirst($periodo).")*\n\n";
         $totalR = 0;
         $totalD = 0;
 
         foreach ($despesas as $exp) {
             $val = number_format($exp->valor, 2, ',', '.');
             $emoji = ($exp->tipo === 'receita') ? '🟢' : '🔴';
-            $msg .= "{$emoji} {$exp->data} - R$ {$val} (" . ($exp->descricao ?? $exp->categoria) . ")\n";
+            $msg .= "{$emoji} {$exp->data} - R$ {$val} (".($exp->descricao ?? $exp->categoria).")\n";
             ($exp->tipo === 'receita') ? $totalR += $exp->valor : $totalD += $exp->valor;
         }
 
-        $msg .= "\n💰 Saldo: R$ " . number_format($totalR - $totalD, 2, ',', '.');
+        $msg .= "\n💰 Saldo: R$ ".number_format($totalR - $totalD, 2, ',', '.');
         $this->sendTelegramMessage($chatId, $msg);
     }
 
     private function isUserAllowed(int $telegramId): bool
     {
         $allowed = env('ALLOWED_TELEGRAM_USERS', '');
-        return ($allowed === '*') || in_array((string)$telegramId, explode(',', $allowed));
+
+        return ($allowed === '*') || in_array((string) $telegramId, explode(',', $allowed));
     }
 
     private function processViaLangflow(string $text): array
@@ -440,34 +450,34 @@ class TelegramWebhookController extends Controller
         ])->timeout(90)
             ->post($url, [
                 'input_value' => $text,
-                'input_type'  => 'chat',
+                'input_type' => 'chat',
                 'output_type' => 'chat',
-                'tweaks'      => ['New Flow' => ['data_atual' => $currentDate]]
+                'tweaks' => ['New Flow' => ['data_atual' => $currentDate]],
             ]);
 
-        if (!$response->successful()) {
-            Log::error("Falha no Langflow API. Status: " . $response->status() . " - Resposta: " . $response->body());
-            throw new \Exception("Falha Langflow.");
+        if (! $response->successful()) {
+            Log::error('Falha no Langflow API. Status: '.$response->status().' - Resposta: '.$response->body());
+            throw new \Exception('Falha Langflow.');
         }
 
         $aiText = $response->json('outputs.0.outputs.0.results.message.data.text');
 
-        if (!$aiText) {
-            Log::error("Langflow retornou uma estrutura de texto vazia.");
-            throw new \Exception("A IA não gerou uma resposta válida.");
+        if (! $aiText) {
+            Log::error('Langflow retornou uma estrutura de texto vazia.');
+            throw new \Exception('A IA não gerou uma resposta válida.');
         }
 
         $cleanJson = preg_replace('/```json\s?|```\s?/', '', $aiText);
         $decoded = json_decode($cleanJson, true);
 
         return [
-            'intencao'  => $decoded['intencao'] ?? 'gasto',
-            'valor'     => floatval($decoded['valor'] ?? 0),
+            'intencao' => $decoded['intencao'] ?? 'gasto',
+            'valor' => floatval($decoded['valor'] ?? 0),
             'categoria' => $decoded['categoria'] ?? null,
             'descricao' => $decoded['descricao'] ?? null,
-            'data'      => $decoded['data'] ?? now()->toDateString(),
-            'periodo'   => $decoded['periodo'] ?? 'mes',
-            'parcelas'  => $decoded['parcelas'] ?? 1,
+            'data' => $decoded['data'] ?? now()->toDateString(),
+            'periodo' => $decoded['periodo'] ?? 'mes',
+            'parcelas' => $decoded['parcelas'] ?? 1,
         ];
     }
 
@@ -476,7 +486,7 @@ class TelegramWebhookController extends Controller
         $payload = [
             'chat_id' => $chatId,
             'text' => $text,
-            'parse_mode' => 'Markdown'
+            'parse_mode' => 'Markdown',
         ];
 
         if ($replyMarkup) {
@@ -492,7 +502,7 @@ class TelegramWebhookController extends Controller
             'chat_id' => $chatId,
             'message_id' => $messageId,
             'text' => $text,
-            'parse_mode' => 'Markdown'
+            'parse_mode' => 'Markdown',
         ]);
     }
 
@@ -500,7 +510,7 @@ class TelegramWebhookController extends Controller
     {
         Http::post("https://api.telegram.org/bot{$this->botToken}/sendChatAction", [
             'chat_id' => $chatId,
-            'action'  => $action
+            'action' => $action,
         ]);
     }
 }

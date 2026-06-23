@@ -13,4 +13,4 @@ $response = $app->handle(Request::capture());
 $response->send();
 
 exit;
-    @file_put_contents($logDir . '/webhook.log', $entry, FILE_APPEND);
+@file_put_contents($logDir.'/webhook.log', $entry, FILE_APPEND);

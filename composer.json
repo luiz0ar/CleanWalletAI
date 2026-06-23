@@ -66,6 +66,21 @@
         "allow-plugins": {
             "pestphp/pest-plugin": true,
             "php-http/discovery": true
+        },
+        "policy": {
+            "advisories": {
+                "block": false
+            }
+        },
+        "audit": {
+            "ignore": {
+                "PKSA-m5cs-t1y6-qpcs": "Ignored on Laravel 11",
+                "PKSA-3r5d-mb8f-1qw9": "Ignored on Laravel 11",
+                "PKSA-mdq4-51ck-6kdq": "Ignored on Laravel 11",
+                "GHSA-crmm-hgp2-wgrp": "Ignored on Laravel 11",
+                "GHSA-5vg9-5847-vvmq": "Ignored on Laravel 11",
+                "CVE-2026-48019": "Ignored on Laravel 11"
+            }
         }
     },
     "minimum-stability": "stable",

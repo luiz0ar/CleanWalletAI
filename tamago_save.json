@@ -1,0 +1,254 @@
+{
+  "schema_version": 2,
+  "saved_at": "2026-06-23T19:05:43.034Z",
+  "tama": {
+    "name": "Pochi",
+    "hunger": 35,
+    "thirst": 0,
+    "sleepy": 0,
+    "happiness": 56,
+    "angry": 40.75,
+    "weight": 46,
+    "sleeping": false,
+    "dead": true,
+    "depressed": false,
+    "pissed_of": false,
+    "overweight": false,
+    "underweight": false,
+    "last_saved": "2026-06-23T19:05:43.034Z",
+    "xp": 69,
+    "level": 2,
+    "stage": 0,
+    "total_feeds": 3,
+    "total_waters": 4,
+    "total_pets": 6,
+    "total_sleeps": 1,
+    "total_exercises": 0,
+    "total_annoys": 0,
+    "total_ticks": 149,
+    "achievements": [
+      {
+        "id": "first_feed",
+        "name": "First Meal",
+        "description": "Feed your pet once",
+        "icon": "🍖",
+        "unlocked": true
+      },
+      {
+        "id": "first_pet",
+        "name": "First Petting",
+        "description": "Pet your pet once",
+        "icon": "🤗",
+        "unlocked": true
+      },
+      {
+        "id": "first_exercise",
+        "name": "First Exercise",
+        "description": "Exercise once",
+        "icon": "💪",
+        "unlocked": false
+      },
+      {
+        "id": "night_owl",
+        "name": "Night Owl",
+        "description": "Stay awake for 50 ticks",
+        "icon": "🌙",
+        "unlocked": true
+      },
+      {
+        "id": "centurion",
+        "name": "Centurion",
+        "description": "Stay awake for 100 ticks",
+        "icon": "👑",
+        "unlocked": true
+      },
+      {
+        "id": "zen_master",
+        "name": "Zen Master",
+        "description": "All stats good (hunger>70, thirst>70, sleepy>70, happiness>70, angry<30)",
+        "icon": "🧘",
+        "unlocked": true
+      },
+      {
+        "id": "marathon",
+        "name": "Marathoner",
+        "description": "Exercise 20 times",
+        "icon": "🏃",
+        "unlocked": false
+      },
+      {
+        "id": "glutton",
+        "name": "Glutton",
+        "description": "Feed 30 times",
+        "icon": "😋",
+        "unlocked": false
+      },
+      {
+        "id": "hydrated",
+        "name": "Hydrated",
+        "description": "Give water 30 times",
+        "icon": "💧",
+        "unlocked": false
+      },
+      {
+        "id": "cuddler",
+        "name": "Cuddler",
+        "description": "Pet 25 times",
+        "icon": "❤️",
+        "unlocked": false
+      },
+      {
+        "id": "troublemaker",
+        "name": "Troublemaker",
+        "description": "Annoy 15 times",
+        "icon": "😈",
+        "unlocked": false
+      },
+      {
+        "id": "evolved_child",
+        "name": "Growing Up!",
+        "description": "Evolve to Child stage",
+        "icon": "🌱",
+        "unlocked": false
+      },
+      {
+        "id": "evolved_teen",
+        "name": "Teenager",
+        "description": "Evolve to Teen stage",
+        "icon": "👦",
+        "unlocked": false
+      },
+      {
+        "id": "evolved_adult",
+        "name": "Adult",
+        "description": "Evolve to Adult stage",
+        "icon": "👨",
+        "unlocked": false
+      },
+      {
+        "id": "evolved_elder",
+        "name": "Wise Elder",
+        "description": "Evolve to Elder stage",
+        "icon": "👴",
+        "unlocked": false
+      },
+      {
+        "id": "level_10",
+        "name": "Level 10",
+        "description": "Reach level 10",
+        "icon": "⭐",
+        "unlocked": false
+      },
+      {
+        "id": "first_dungeon",
+        "name": "Adventurer",
+        "description": "Enter dungeon once",
+        "icon": "⚔️",
+        "unlocked": false
+      },
+      {
+        "id": "dragon_slayer",
+        "name": "Dragon Slayer",
+        "description": "Defeat a boss",
+        "icon": "🐉",
+        "unlocked": false
+      },
+      {
+        "id": "dungeon_master",
+        "name": "Dungeon Master",
+        "description": "Complete 5 dungeon runs",
+        "icon": "🏰",
+        "unlocked": false
+      },
+      {
+        "id": "quest_master",
+        "name": "Quest Master",
+        "description": "Complete 10 quests",
+        "icon": "🎯",
+        "unlocked": false
+      }
+    ],
+    "inventory": {
+      "gold": 0
+    },
+    "total_dungeon_runs": 0,
+    "total_bosses_defeated": 0,
+    "current_biome": "Florestal",
+    "class": "guardia",
+    "mp": 20,
+    "mp_max": 20,
+    "skills_known": [
+      "muralha",
+      "golpe_escudo",
+      "resistencia"
+    ],
+    "quest_progress": [
+      {
+        "quest_id": "primeira_aventura",
+        "status": "active",
+        "baseline": 0,
+        "started_at": "2026-06-22T20:21:39.479Z"
+      },
+      {
+        "quest_id": "evolucao_child",
+        "status": "active",
+        "baseline": 0,
+        "started_at": "2026-06-22T20:21:39.479Z"
+      },
+      {
+        "quest_id": "daily_feed",
+        "status": "active",
+        "baseline": 0,
+        "started_at": "2026-06-23T11:34:10.218Z"
+      },
+      {
+        "quest_id": "daily_water",
+        "status": "claimed",
+        "baseline": 0,
+        "started_at": "2026-06-23T11:34:10.218Z"
+      },
+      {
+        "quest_id": "daily_pet",
+        "status": "claimed",
+        "baseline": 0,
+        "started_at": "2026-06-23T11:34:10.218Z"
+      },
+      {
+        "quest_id": "exterminador",
+        "status": "active",
+        "baseline": 0,
+        "started_at": "2026-06-22T20:21:39.479Z"
+      },
+      {
+        "quest_id": "explorador",
+        "status": "active",
+        "baseline": 0,
+        "started_at": "2026-06-22T20:21:39.479Z"
+      },
+      {
+        "quest_id": "carinhoso_rep",
+        "status": "active",
+        "baseline": 0,
+        "started_at": "2026-06-22T20:21:39.479Z"
+      },
+      {
+        "quest_id": "alimentador",
+        "status": "active",
+        "baseline": 0,
+        "started_at": "2026-06-22T20:21:39.479Z"
+      },
+      {
+        "quest_id": "atleta",
+        "status": "active",
+        "baseline": 0,
+        "started_at": "2026-06-22T20:21:39.479Z"
+      }
+    ],
+    "total_quests_done": 2,
+    "last_daily_reset": "2026-06-23T11:34:10.218Z",
+    "total_enemies_defeated": 0
+  },
+  "inventory": {
+    "gold": 0
+  }
+}

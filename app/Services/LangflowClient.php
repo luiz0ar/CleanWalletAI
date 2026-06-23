@@ -7,6 +7,7 @@ use GuzzleHttp\Client;
 class LangflowClient
 {
     protected $baseUrl;
+
     protected $http;
 
     public function __construct()
@@ -21,10 +22,10 @@ class LangflowClient
             'json' => [
                 'text' => $text,
                 'now' => $now,
-            ]
+            ],
         ]);
 
-        $body = json_decode((string)$resp->getBody(), true);
+        $body = json_decode((string) $resp->getBody(), true);
 
         return [
             'valor' => $body['valor'] ?? 0,

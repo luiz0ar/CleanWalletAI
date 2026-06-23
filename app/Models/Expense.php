@@ -6,9 +6,9 @@ use MongoDB\Laravel\Eloquent\Model;
 
 class Expense extends Model
 {
-    protected $connection = 'mongodb'; 
-    
-    protected $collection = 'expenses'; 
+    protected $connection = 'mongodb';
+
+    protected $collection = 'expenses';
 
     protected $fillable = [
         'telegram_id',
