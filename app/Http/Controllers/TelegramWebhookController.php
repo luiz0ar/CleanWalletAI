@@ -322,7 +322,7 @@ class TelegramWebhookController extends Controller
             $this->editTelegramMessage($chatId, $messageId, "🗑️ *Parcelas Canceladas*\nTodos os lançamentos do grupo foram removidos.");
         } elseif (strpos($data, 'undo_') === 0) {
             $id = str_replace('undo_', '', $data);
-            /** @var \App\Models\Expense|null $expense */
+            /** @var Expense|null $expense */
             $expense = Expense::find($id);
 
             if ($expense) {
