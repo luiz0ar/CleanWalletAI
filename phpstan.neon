@@ -1,0 +1,10 @@
+includes:
+    - ./vendor/nunomaduro/larastan/extension.neon
+
+parameters:
+
+    paths:
+        - app/
+
+    # Level 5 is the default rule level for Larastan
+    level: 5
