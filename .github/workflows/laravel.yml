@@ -31,7 +31,9 @@ jobs:
               run: php -r "file_exists('.env') || copy('.env.example', '.env');"
 
             - name: Install Dependencies
-              run: composer install --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
+              run: |
+                  composer install --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
+                  composer require --dev nunomaduro/larastan --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
 
             - name: 1.1. Check PHP Security Audit
               run: composer audit || true
