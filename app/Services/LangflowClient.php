@@ -12,7 +12,7 @@ class LangflowClient
 
     public function __construct()
     {
-        $this->baseUrl = env('LANGFLOW_URL');
+        $this->baseUrl = config('services.langflow.url');
         $this->http = new Client(['base_uri' => $this->baseUrl]);
     }
 

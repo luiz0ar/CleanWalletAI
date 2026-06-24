@@ -16,7 +16,7 @@ class TelegramWebhookController extends Controller
 
     public function __construct()
     {
-        $this->botToken = env('TELEGRAM_BOT_TOKEN');
+        $this->botToken = config('services.telegram.bot_token');
     }
 
     public function handle(Request $request)
@@ -200,7 +200,7 @@ class TelegramWebhookController extends Controller
 
     private function processImageWithGemini(string $filePath): array
     {
-        $apiKey = env('GEMINI_API_KEY');
+        $apiKey = config('services.gemini.api_key');
         $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$apiKey}";
 
         $base64Image = base64_encode(file_get_contents($filePath));
@@ -294,7 +294,7 @@ class TelegramWebhookController extends Controller
 
     private function transcribeAudio(string $filePath): string
     {
-        $apiKey = env('GROQ_API_KEY');
+        $apiKey = config('services.groq.api_key');
         $response = Http::withHeaders(['Authorization' => "Bearer {$apiKey}"])
             ->attach('file', file_get_contents($filePath), 'audio.ogg')
             ->post('https://api.groq.com/openai/v1/audio/transcriptions', [
@@ -322,6 +322,7 @@ class TelegramWebhookController extends Controller
             $this->editTelegramMessage($chatId, $messageId, "🗑️ *Parcelas Canceladas*\nTodos os lançamentos do grupo foram removidos.");
         } elseif (strpos($data, 'undo_') === 0) {
             $id = str_replace('undo_', '', $data);
+            /** @var \App\Models\Expense|null $expense */
             $expense = Expense::find($id);
 
             if ($expense) {
@@ -432,16 +433,16 @@ class TelegramWebhookController extends Controller
 
     private function isUserAllowed(int $telegramId): bool
     {
-        $allowed = env('ALLOWED_TELEGRAM_USERS', '');
+        $allowed = config('services.telegram.allowed_users');
 
         return ($allowed === '*') || in_array((string) $telegramId, explode(',', $allowed));
     }
 
     private function processViaLangflow(string $text): array
     {
-        $baseUrl = rtrim(env('LANGFLOW_URL', 'http://localhost:8000'), '/');
+        $baseUrl = rtrim(config('services.langflow.url'), '/');
         $currentDate = now()->toIso8601String();
-        $flowId = env('LANGFLOW_FLOW_ID');
+        $flowId = config('services.langflow.flow_id');
 
         $url = "{$baseUrl}/api/v1/run/{$flowId}?stream=false";
 

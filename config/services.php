@@ -35,4 +35,22 @@ return [
         ],
     ],
 
+    'telegram' => [
+        'bot_token' => env('TELEGRAM_BOT_TOKEN'),
+        'allowed_users' => env('ALLOWED_TELEGRAM_USERS', ''),
+    ],
+
+    'langflow' => [
+        'url' => env('LANGFLOW_URL', 'http://localhost:8000'),
+        'flow_id' => env('LANGFLOW_FLOW_ID'),
+    ],
+
+    'gemini' => [
+        'api_key' => env('GEMINI_API_KEY'),
+    ],
+
+    'groq' => [
+        'api_key' => env('GROQ_API_KEY'),
+    ],
+
 ];
